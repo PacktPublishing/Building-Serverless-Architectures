@@ -1,0 +1,1020 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "DeploymentBucket": {
+      "Type": "String",
+      "Description": "S3 bucket name where built artifacts are deployed"
+    },
+    "ProjectVersion": {
+      "Type": "String",
+      "Description": "Project Version"
+    },
+    "DeploymentTime": {
+      "Type": "String",
+      "Description": "It is a timestamp value which shows the deployment time. Used to rotate sources."
+    },
+    "DomainName": {
+      "Type": "String",
+      "Description": "Domain Name to serve the application"
+    }
+  },
+  "Resources": {
+    "DeploymentLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path": "/",
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "LambdaExecutionPolicy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:PublishVersion",
+                    "apigateway:POST"
+                  ],
+                  "Resource": [
+                    "*"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "DeploymentLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Role": {
+          "Fn::GetAtt": [
+            "DeploymentLambdaRole",
+            "Arn"
+          ]
+        },
+        "Handler": "serverless.handler",
+        "Runtime": "nodejs4.3",
+        "Code": {
+          "S3Bucket": {
+            "Fn::Sub": "serverless-arch-${AWS::Region}"
+          },
+          "S3Key": "serverless.zip"
+        }
+      }
+    },
+    "ApiGatewayCloudwatchRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "apigateway.amazonaws.com"
+                ]
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Path": "/",
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+        ]
+      }
+    },
+    "ApiGatewayAccount": {
+      "Type": "AWS::ApiGateway::Account",
+      "Properties": {
+        "CloudWatchRoleArn": {
+          "Fn::GetAtt": [
+            "ApiGatewayCloudwatchRole",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "RestApi": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Properties": {
+        "Name": {
+          "Ref": "AWS::StackName"
+        }
+      }
+    },
+    "LambdaExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Path": "/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com",
+                  "apigateway.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        ]
+      }
+    },
+    "LambdaCustomPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "LambdaCustomPolicy",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:GetItem",
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+                "dynamodb:ListTables",
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:UpdateItem"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TokenTable}*"
+                },
+                {
+                  "Fn::Sub": "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UserTable}*"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "SNS:Publish"
+              ],
+              "Resource": [
+                {
+                  "Ref": "UserRegistrationSnsTopic"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ses:*"
+              ],
+              "Resource": "*"
+            }
+          ]
+        },
+        "Roles": [
+          {
+            "Ref": "LambdaExecutionRole"
+          }
+        ]
+      }
+    },
+    "TestLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Handler": "com.serverlessbook.lambda.test.Handler",
+        "Runtime": "java8",
+        "Timeout": "300",
+        "MemorySize": "1024",
+        "Description": "Test lambda",
+        "Role": {
+          "Fn::GetAtt": [
+            "LambdaExecutionRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "DeploymentBucket"
+          },
+          "S3Key": {
+            "Fn::Sub": "artifacts/lambda-test/${ProjectVersion}/${DeploymentTime}.jar"
+          }
+        }
+      }
+    },
+    "TestResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "PathPart": "test",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "ParentId": {
+          "Fn::GetAtt": [
+            "RestApi",
+            "RootResourceId"
+          ]
+        }
+      }
+    },
+    "TestGetMethod": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "HttpMethod": "GET",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "ResourceId": {
+          "Ref": "TestResource"
+        },
+        "AuthorizationType": "CUSTOM",
+        "AuthorizerId": {
+          "Ref": "ApiGatewayAuthorizer"
+        },
+        "RequestParameters": {
+          "method.request.querystring.value": "True",
+          "method.request.header.Accept": "True"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": "200"
+          }
+        ],
+        "Integration": {
+          "Type": "AWS",
+          "Uri": {
+            "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TestLambda.Arn}/invocations"
+          },
+          "IntegrationHttpMethod": "POST",
+          "RequestParameters": {
+            "integration.request.querystring.value": "method.request.querystring.value",
+            "integration.request.header.Accept": "method.request.header.Accept"
+          },
+          "RequestTemplates": {
+            "application/json": "{\"value\":\"$input.params('value')\"}"
+          },
+          "PassthroughBehavior": "NEVER",
+          "IntegrationResponses": [
+            {
+              "SelectionPattern": ".*",
+              "StatusCode": "200"
+            }
+          ]
+        }
+      }
+    },
+    "TestLambdaPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "TestLambda"
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*"
+        }
+      }
+    },
+    "ApiDeployment": {
+      "DependsOn": [
+        "TestGetMethod"
+      ],
+      "Type": "Custom::ApiDeployment",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "DeploymentLambda",
+            "Arn"
+          ]
+        },
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "StageName": "production",
+        "DeploymentTime": {
+          "Ref": "DeploymentTime"
+        }
+      }
+    },
+    "CloudformationDistribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Aliases": [
+            {
+              "Ref": "DomainName"
+            }
+          ],
+          "ViewerCertificate": {
+            "SslSupportMethod": "sni-only",
+            "AcmCertificateArn": {
+              "Ref": "SSLCertificate"
+            }
+          },
+          "Enabled": "true",
+          "HttpVersion": "http2",
+          "Origins": [
+            {
+              "DomainName": {
+                "Fn::Sub": "${RestApi}.execute-api.${AWS::Region}.amazonaws.com"
+              },
+              "OriginPath": "/production",
+              "Id": "APIGATEWAY",
+              "CustomOriginConfig": {
+                "OriginProtocolPolicy": "https-only"
+              }
+            },
+            {
+              "DomainName": {
+                "Fn::Sub": "${ProfilePicturesBucket}.s3.amazonaws.com"
+              },
+              "Id": "PROFILE_PICTURES",
+              "S3OriginConfig": {
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "APIGATEWAY",
+            "Compress": true,
+            "AllowedMethods": [
+              "DELETE",
+              "GET",
+              "HEAD",
+              "OPTIONS",
+              "PATCH",
+              "POST",
+              "PUT"
+            ],
+            "ForwardedValues": {
+              "QueryString": "true",
+              "Cookies": {
+                "Forward": "none"
+              },
+              "Headers": [
+                "Accept",
+                "Content-Type",
+                "Authorization"
+              ]
+            },
+            "DefaultTTL": 0,
+            "MaxTTL": 0,
+            "MinTTL": 0,
+            "ViewerProtocolPolicy": "redirect-to-https"
+          },
+          "CacheBehaviors": [
+            {
+              "PathPattern": "/users/*/picture/*",
+              "TargetOriginId": "PROFILE_PICTURES",
+              "Compress": true,
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS"
+              ],
+              "ForwardedValues": {
+                "QueryString": "false",
+                "Cookies": {
+                  "Forward": "none"
+                }
+              },
+              "DefaultTTL": 0,
+              "MinTTL": 0,
+              "MaxTTL": 0,
+              "ViewerProtocolPolicy": "redirect-to-https"
+            }
+          ]
+        }
+      }
+    },
+    "Route53HostedZone": {
+      "Type": "AWS::Route53::HostedZone",
+      "Properties": {
+        "HostedZoneConfig": {
+          "Comment": "Serverless Book Project Hosted Zone"
+        },
+        "Name": {
+          "Ref": "DomainName"
+        }
+      }
+    },
+    "DNSRecord": {
+      "Type": "AWS::Route53::RecordSetGroup",
+      "Properties": {
+        "HostedZoneId": {
+          "Ref": "Route53HostedZone"
+        },
+        "RecordSets": [
+          {
+            "Name": {
+              "Ref": "DomainName"
+            },
+            "Type": "A",
+            "AliasTarget": {
+              "HostedZoneId": "Z2FDTNDATAQYW2",
+              "DNSName": {
+                "Fn::GetAtt": [
+                  "CloudformationDistribution",
+                  "DomainName"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "SSLCertificate": {
+      "Type": "AWS::CertificateManager::Certificate",
+      "Properties": {
+        "DomainName": {
+          "Ref": "DomainName"
+        },
+        "DomainValidationOptions": [
+          {
+            "DomainName": {
+              "Ref": "DomainName"
+            },
+            "ValidationDomain": "merkurapp.com"
+          }
+        ]
+      }
+    },
+    "AuthorizerLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Handler": "com.serverlessbook.lambda.authorizer.Handler",
+        "Runtime": "java8",
+        "Timeout": "300",
+        "MemorySize": "1024",
+        "Description": "Test lambda",
+        "Role": {
+          "Fn::GetAtt": [
+            "LambdaExecutionRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "DeploymentBucket"
+          },
+          "S3Key": {
+            "Fn::Sub": "artifacts/lambda-authorizer/${ProjectVersion}/${DeploymentTime}.jar"
+          }
+        },
+        "Environment": {
+          "Variables": {
+            "DynamoDbTokenTable": {
+              "Ref": "TokenTable"
+            },
+            "DynamoDbUserTable": {
+              "Ref": "UserTable"
+            }
+          }
+        }
+      }
+    },
+    "ApiGatewayAuthorizer": {
+      "Type": "AWS::ApiGateway::Authorizer",
+      "Properties": {
+        "Name": "AUTHORIZER",
+        "Type": "TOKEN",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "AuthorizerUri": {
+          "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerLambda.Arn}/invocations"
+        },
+        "AuthorizerCredentials": {
+          "Fn::GetAtt": [
+            "LambdaExecutionRole",
+            "Arn"
+          ]
+        },
+        "IdentitySource": "method.request.header.Authorization",
+        "IdentityValidationExpression": "Bearer ?[a-zA-Z_0-9+=,.@\\-_/-]+",
+        "AuthorizerResultTtlInSeconds": 120
+      }
+    },
+    "AuthorizerLambdaPermisson": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "AuthorizerLambda"
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/authorizers/${ApiGatewayAuthorizer}"
+        }
+      }
+    },
+    "UserTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "UserId",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "Username",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "Email",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "UserId",
+            "KeyType": "HASH"
+          }
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "UsernameIndex",
+            "KeySchema": [
+              {
+                "AttributeName": "Username",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            },
+            "ProvisionedThroughput": {
+              "ReadCapacityUnits": 1,
+              "WriteCapacityUnits": 1
+            }
+          },
+          {
+            "IndexName": "EmailIndex",
+            "KeySchema": [
+              {
+                "AttributeName": "Email",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            },
+            "ProvisionedThroughput": {
+              "ReadCapacityUnits": 1,
+              "WriteCapacityUnits": 1
+            }
+          }
+        ],
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 1,
+          "WriteCapacityUnits": 1
+        }
+      }
+    },
+    "TokenTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "Token",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "Token",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 1,
+          "WriteCapacityUnits": 1
+        }
+      }
+    },
+    "UserRegistrationLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Handler": "com.serverlessbook.lambda.userregistration.Handler",
+        "Runtime": "java8",
+        "Timeout": "300",
+        "MemorySize": "1024",
+        "Description": "User registration Lambda",
+        "Role": {
+          "Fn::GetAtt": [
+            "LambdaExecutionRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "DeploymentBucket"
+          },
+          "S3Key": {
+            "Fn::Sub": "artifacts/lambda-userregistration/${ProjectVersion}/${DeploymentTime}.jar"
+          }
+        },
+        "Environment": {
+          "Variables": {
+            "DynamoDbTokenTable": {
+              "Ref": "TokenTable"
+            },
+            "DynamoDbUserTable": {
+              "Ref": "UserTable"
+            },
+            "UserRegistrationSnsTopic": {
+              "Ref": "UserRegistrationSnsTopic"
+            }
+          }
+        }
+      }
+    },
+    "UsersResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "PathPart": "users",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "ParentId": {
+          "Fn::GetAtt": [
+            "RestApi",
+            "RootResourceId"
+          ]
+        }
+      }
+    },
+    "UsersPostMethod": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "HttpMethod": "POST",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "ResourceId": {
+          "Ref": "UsersResource"
+        },
+        "AuthorizationType": "NONE",
+        "RequestParameters": {
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": "201",
+            "ResponseParameters": {
+              "method.response.header.Location": "true"
+            }
+          },
+          {
+            "StatusCode": "400"
+          },
+          {
+            "StatusCode": "409"
+          }
+        ],
+        "Integration": {
+          "Type": "AWS",
+          "Uri": {
+            "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserRegistrationLambda.Arn}/invocations"
+          },
+          "IntegrationHttpMethod": "POST",
+          "RequestParameters": {
+          },
+          "RequestTemplates": {
+            "application/json": "{\"username\": $input.json('$.username'),\"email\": $input.json('$.email')}"
+          },
+          "PassthroughBehavior": "NEVER",
+          "IntegrationResponses": [
+            {
+              "SelectionPattern": ".*",
+              "StatusCode": "201",
+              "ResponseParameters": {
+                "method.response.header.Location": "integration.response.body.resourceUrl"
+              },
+              "ResponseTemplates": {
+                "application/json": "#set($inputRoot = $input.path('$'))"
+              }
+            },
+            {
+              "SelectionPattern": ".*not valid.*",
+              "StatusCode": "400",
+              "ResponseTemplates": {
+                "application/json": "{\"code\": 400, \"errorMessage\":\"$input.path('$.errorMessage')\"}"
+              }
+            },
+            {
+              "SelectionPattern": ".*already exists.*",
+              "StatusCode": "409",
+              "ResponseTemplates": {
+                "application/json": "{\"code\": 409, \"errorMessage\":\"$input.path('$.errorMessage')\"}"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "UsersPostLambdaPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "UserRegistrationLambda"
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*"
+        }
+      }
+    },
+    "ImageResizerLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Handler": "com.serverlessbook.lambda.imageresizer.Handler",
+        "Runtime": "java8",
+        "Timeout": "300",
+        "MemorySize": "1024",
+        "Description": "Test lambda",
+        "Role": {
+          "Fn::GetAtt": [
+            "LambdaExecutionRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "DeploymentBucket"
+          },
+          "S3Key": {
+            "Fn::Sub": "artifacts/lambda-imageresizer/${ProjectVersion}/${DeploymentTime}.jar"
+          }
+        }
+      }
+    },
+    "ProfilePicturesBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": {
+          "Fn::Sub": "${DomainName}-profilepictures"
+        },
+        "NotificationConfiguration": {
+          "LambdaConfigurations": [
+            {
+              "Event": "s3:ObjectCreated:*",
+              "Filter": {
+                "S3Key": {
+                  "Rules": [
+                    {
+                      "Name": "prefix",
+                      "Value": "uploads/"
+                    }
+                  ]
+                }
+              },
+              "Function": {
+                "Fn::GetAtt": [
+                  "ImageResizerLambda",
+                  "Arn"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ImageResizerLambdaPermisson": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "ImageResizerLambda"
+        },
+        "Principal": "s3.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:s3:::${DomainName}-profilepictures"
+        }
+      }
+    },
+    "ApiGatewayProxyRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "apigateway.amazonaws.com"
+                ]
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "S3BucketPolicy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject",
+                    "s3:PutObjectAcl"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:s3:::${ProfilePicturesBucket}"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:s3:::${ProfilePicturesBucket}/*"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "UsersIdResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "PathPart": "{id}",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "ParentId": {
+          "Ref": "UsersResource"
+        }
+      }
+    },
+    "UsersIdPictureResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "PathPart": "picture",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "ParentId": {
+          "Ref": "UsersIdResource"
+        }
+      }
+    },
+    "UsersIdPicturePutMethod": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "HttpMethod": "PUT",
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "AuthorizationType": "CUSTOM",
+        "AuthorizerId": {
+          "Ref": "ApiGatewayAuthorizer"
+        },
+        "ResourceId": {
+          "Ref": "UsersIdPictureResource"
+        },
+        "RequestParameters": {
+          "method.request.path.id": "True",
+          "method.request.header.Content-Type": "True",
+          "method.request.header.Content-Length": "True"
+        },
+        "Integration": {
+          "Type": "AWS",
+          "Uri": {
+            "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:s3:path/${ProfilePicturesBucket}/uploads/{filename}"
+          },
+          "IntegrationHttpMethod": "PUT",
+          "Credentials": {
+            "Fn::GetAtt": [
+              "ApiGatewayProxyRole",
+              "Arn"
+            ]
+          },
+          "RequestParameters": {
+            "integration.request.path.filename": "context.requestId",
+            "integration.request.header.Content-Type": "method.request.header.Content-Type",
+            "integration.request.header.Content-Length": "method.request.header.Content-Length",
+            "integration.request.header.Expect": "'100-continue'",
+            "integration.request.header.x-amz-acl": "'public-read'",
+            "integration.request.header.x-amz-meta-user-id": "method.request.path.id"
+          },
+          "RequestTemplates": {
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "SelectionPattern": "4\\d{2}",
+              "StatusCode": "400"
+            },
+            {
+              "SelectionPattern": "5\\d{2}",
+              "StatusCode": "500"
+            },
+            {
+              "SelectionPattern": ".*",
+              "StatusCode": "202",
+              "ResponseTemplates": {
+                "application/json": {
+                  "Fn::Sub": "{\"status\": \"pending\"}"
+                }
+              }
+            }
+          ]
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": "202"
+          },
+          {
+            "StatusCode": "400"
+          },
+          {
+            "StatusCode": "500"
+          }
+        ]
+      }
+    },
+    "UserRegistrationSnsTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "Subscription": []
+      }
+    },
+    "UserRegistrationWelcomeMailLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Handler": "com.serverlessbook.lambda.userregistration.welcomemail.Handler",
+        "Runtime": "java8",
+        "Timeout": "300",
+        "MemorySize": "1024",
+        "Description": "User registration welcome mail Lambda",
+        "Role": {
+          "Fn::GetAtt": [
+            "LambdaExecutionRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "DeploymentBucket"
+          },
+          "S3Key": {
+            "Fn::Sub": "artifacts/lambda-userregistration-welcomemail/${ProjectVersion}/${DeploymentTime}.jar"
+          }
+        },
+        "Environment": {
+          "Variables": {
+            "SenderEmail": "info@example.com"
+          }
+        }
+      }
+    },
+    "UserRegistrationWelcomeMailLambdaPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "UserRegistrationWelcomeMailLambda"
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:*"
+        }
+      }
+    }
+  }
+}
