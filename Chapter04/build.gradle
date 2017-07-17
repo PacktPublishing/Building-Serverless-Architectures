@@ -1,0 +1,110 @@
+task wrapper(type: Wrapper) {
+    gradleVersion = '3.0'
+}
+
+// allprojects means this configuration
+// will be inherited by the root project itself and subprojects
+allprojects {
+    // Artifact Id of the projct
+    group 'com.serverlessbook'
+    // Version of the project
+    version '1.0'
+    // Gradle JAVA plugin needed for JAVA support
+    apply plugin: 'java'
+    // We will be using JAVA 8, then 1.8
+    sourceCompatibility = 1.8
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+        jcenter()
+        maven {
+            url "https://jitpack.io"
+        }
+    }
+}
+
+buildscript {
+    repositories {
+        mavenCentral()
+        jcenter()
+        maven {
+            url "https://jitpack.io"
+        }
+    }
+
+    dependencies {
+        classpath "com.github.jengelman.gradle.plugins:shadow:1.2.3"
+        classpath "jp.classmethod.aws:gradle-aws-plugin:0.31"
+    }
+}
+
+allprojects {
+    apply plugin: "jp.classmethod.aws"
+    aws {
+        region = "us-east-1"
+    }
+}
+
+allprojects {
+    dependencies {
+        testCompile group: 'junit', name: 'junit', version: '4.11'
+    }
+}
+
+def deploymentBucketName = "serverless-book-${aws.region}"
+def deploymentTime = new java.text.SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+
+allprojects {
+    apply plugin: "jp.classmethod.aws.s3"
+    task createDeploymentBucket(type: jp.classmethod.aws.gradle.s3.CreateBucketTask) {
+        bucketName deploymentBucketName
+        ifNotExists true
+    }
+}
+
+configure(subprojects.findAll { it.name.startsWith("lambda-") }) {
+    dependencies {
+        compile project(':lambda')
+    }
+    apply plugin: "com.github.johnrengelman.shadow"
+    build.finalizedBy shadowJar
+
+    def producedJarFilePath = it.tasks.shadowJar.archivePath
+    def s3Key = "artifacts/${it.name}/${it.version}/${deploymentTime}.jar"
+
+    task uploadArtifactsToS3(type: jp.classmethod.aws.gradle.s3.AmazonS3FileUploadTask,
+            dependsOn: [build, createDeploymentBucket]) {
+        bucketName deploymentBucketName
+        file producedJarFilePath
+        key s3Key
+    }
+}
+
+apply plugin: "jp.classmethod.aws.cloudformation"
+
+cloudFormation {
+    capabilityIam true
+    templateFile project.file('cloudformation.template')
+    templateBucket deploymentBucketName
+    templateKeyPrefix "cfn-templates"
+    stackName "serverlessbook"
+    conventionMapping.stackParams = {
+        return [
+                DeploymentBucket: deploymentBucketName,
+                ProjectVersion  : project.version,
+                DeploymentTime  : deploymentTime,
+                DomainName      : "serverlessbook.merkurapp.com"
+        ]
+    }
+}
+
+awsCfnMigrateStack.dependsOn awsCfnUploadTemplate
+
+task deploy {
+    configure(subprojects.findAll { it.name.startsWith("lambda-") }) {
+        dependsOn it.uploadArtifactsToS3
+    }
+    finalizedBy awsCfnMigrateStackAndWaitCompleted
+}
