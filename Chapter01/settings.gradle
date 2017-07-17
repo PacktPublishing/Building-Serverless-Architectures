@@ -1,0 +1,3 @@
+rootProject.name = 'forum'
+include 'lambda'
+include 'lambda-test'
