@@ -27,7 +27,3 @@ cloudFormation {
 * [Going Serverless with .NET [Video]](https://www.packtpub.com/application-development/going-serverless-net-video?utm_source=github&utm_medium=repository&utm_content=9781787281295)
 
 * [Serverless computing with Azure and .NET](https://www.packtpub.com/application-development/serverless-computing-azure-and-net?utm_source=github&utm_medium=repository&utm_content=9781787288393)
-
-### Suggestions and Feedback
-[Click here](https://docs.google.com/forms/d/e/1FAIpQLSe5qwunkGf6PUvzPirPDtuy1Du5Rlzew23UBp2S-P3wB-GcwQ/viewform) if you have any feedback or suggestions.
-
