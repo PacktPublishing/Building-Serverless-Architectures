@@ -27,3 +27,7 @@ cloudFormation {
 * [Going Serverless with .NET [Video]](https://www.packtpub.com/application-development/going-serverless-net-video?utm_source=github&utm_medium=repository&utm_content=9781787281295)
 
 * [Serverless computing with Azure and .NET](https://www.packtpub.com/application-development/serverless-computing-azure-and-net?utm_source=github&utm_medium=repository&utm_content=9781787288393)
+### Download a free PDF
+
+ <i>If you have already purchased a print or Kindle version of this book, you can get a DRM-free PDF version at no cost.<br>Simply click on the link to claim your free PDF.</i>
+<p align="center"> <a href="https://packt.link/free-ebook/9781787129191">https://packt.link/free-ebook/9781787129191 </a> </p>
